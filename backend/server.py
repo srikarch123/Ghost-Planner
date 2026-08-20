@@ -95,7 +95,15 @@ CATCHUP_SPEED_FACTOR = 1.5
 # increasingly outdated point.
 LEADER_STALE_TIMEOUT_S = 10.0
 
-FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+# In dev, this is just ../frontend/dist relative to this source file. When
+# frozen into a standalone .exe (PyInstaller), __file__ instead points into
+# the bundle's temp extraction dir (sys._MEIPASS) -- the frontend build gets
+# placed there too, under "frontend_dist" (see the --add-data mapping in
+# the GitHub Actions build workflow).
+if getattr(sys, "frozen", False):
+    FRONTEND_DIST = Path(sys._MEIPASS) / "frontend_dist"
+else:
+    FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
 app = Flask(__name__, static_folder=str(FRONTEND_DIST), static_url_path="/")
 CORS(app)  # frontend dev server runs on a different port (5173) during development
@@ -494,4 +502,11 @@ if __name__ == "__main__":
     print(f"Radio: auto-detecting RFD900x (VID:PID {RADIO_VID:04x}:{RADIO_PID:04x})"
           f"{f' -- currently at {detected}' if detected else ' -- none found yet, will keep retrying'}"
           f" @ {RADIO_BAUD}  |  HTTP: http://localhost:{HTTP_PORT}/")
+    if getattr(sys, "frozen", False):
+        # Packaged .exe has no separate dev server to open manually --
+        # launch the UI in the default browser automatically. threading.Timer
+        # so it fires after app.run() below has actually started listening,
+        # not before.
+        import webbrowser
+        threading.Timer(1.0, lambda: webbrowser.open(f"http://localhost:{HTTP_PORT}/")).start()
     app.run(host="127.0.0.1", port=HTTP_PORT, threaded=True)
