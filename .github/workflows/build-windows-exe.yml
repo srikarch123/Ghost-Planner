@@ -49,6 +49,41 @@ jobs:
           --add-data "../frontend/dist;frontend_dist"
           server.py
 
+      # A successful PyInstaller build only proves packaging didn't error --
+      # it doesn't prove the exe actually launches, that Flask binds, or
+      # that the bundled frontend gets served correctly (the frozen-path
+      # resolution and pymavlink's dynamic dialect import are both only
+      # verified at runtime, not at build time). No radio/Cube hardware is
+      # attached to this runner, so this can't test the actual driving
+      # functionality -- but it does catch "the exe is broken" before
+      # anyone downloads it to find out by hand.
+      - name: Smoke test the built exe
+        shell: pwsh
+        run: |
+          $proc = Start-Process -FilePath "backend\dist\GhostPlanner.exe" -RedirectStandardOutput "exe_stdout.log" -RedirectStandardError "exe_stderr.log" -PassThru
+          try {
+            $ok = $false
+            for ($i = 0; $i -lt 20; $i++) {
+              Start-Sleep -Seconds 1
+              try {
+                $status = Invoke-WebRequest -Uri "http://localhost:5050/status" -UseBasicParsing -TimeoutSec 3
+                $ui = Invoke-WebRequest -Uri "http://localhost:5050/" -UseBasicParsing -TimeoutSec 3
+                if ($status.StatusCode -eq 200 -and $ui.StatusCode -eq 200 -and $ui.Content -match "Ghost Planner") {
+                  $ok = $true
+                  break
+                }
+              } catch {}
+            }
+            if (-not $ok) {
+              Write-Host "--- stdout ---"; Get-Content "exe_stdout.log" -ErrorAction SilentlyContinue
+              Write-Host "--- stderr ---"; Get-Content "exe_stderr.log" -ErrorAction SilentlyContinue
+              throw "GhostPlanner.exe did not come up and serve the UI within 20s"
+            }
+            Write-Host "Smoke test passed: exe launched, /status and / both responded."
+          } finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          }
+
       - uses: actions/upload-artifact@v4
         with:
           name: GhostPlanner-windows-exe
