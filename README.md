@@ -125,16 +125,26 @@ dropped connection anywhere in the chain forces neutral automatically.
 
 `frontend/src/components/RobotMap.jsx` shows the robot's live position on a
 Google Map, centered on the last GPS fix. It needs a Google Maps
-JavaScript API key:
+JavaScript API key, served to the frontend by the **backend at runtime**
+(`GET`/`POST /api/config` in `backend/server.py`) rather than baked into
+the frontend build — this matters because a packaged `.exe` (see
+"Packaging as a Windows exe" below) is built once in CI and distributed
+afterward, with no build step left at install time to bake a key into.
 
-1. Create `frontend/.env` (gitignored, never commit it) with:
-   ```
-   VITE_GOOGLE_MAPS_API_KEY=your-key-here
-   ```
-   `frontend/.env.example` documents the variable name.
-2. Restart `./start_frontend.sh` — Vite only reads `.env` at startup.
+- **Easiest**: just run the app with no key configured — the map shows a
+  field to enter one, which saves it via `POST /api/config` to
+  `backend/config.json` (gitignored, next to `server.py` in dev or next to
+  the `.exe` when packaged) and it's remembered on every future launch, no
+  rebuild needed.
+- **Alternative for dev/CI**: set a `GOOGLE_MAPS_API_KEY` environment
+  variable before starting `backend/server.py` — this always takes
+  precedence over whatever's saved in `config.json`.
 
-No backend changes were needed for this — `pi/rover_control.py` already
+No frontend build-time env var is used for this anymore (the old
+`VITE_GOOGLE_MAPS_API_KEY` / `frontend/.env` approach is gone).
+
+No other backend changes were needed for the map itself beyond the key
+endpoint above — `pi/rover_control.py` already
 tracks `lat`/`lon` from `GPS_RAW_INT` in its status dict, which
 `radio_bridge.py` already relays over the radio and `backend/server.py`
 already exposes via `/status`. The frontend just polls that (already
@@ -223,13 +233,38 @@ map to "Waiting for GPS fix…". Fixed by merging (`setStatus(prev => ({...
 prev, connected:false, ...}))`) instead of replacing, so a failed poll only
 marks "disconnected" without discarding the last known position.
 
-### Building for packaging (future .exe)
+### Packaging as a Windows exe
 
 `npm run build` in `frontend/` produces `frontend/dist/`; once that exists,
 `backend/server.py`'s `/` route serves it directly — so `python
-backend/server.py` alone becomes a single process serving both the UI and
-the API. That's the shape a future Electron/PyInstaller packaging step
-would wrap.
+backend/server.py` alone is a single process serving both the UI and the
+API. `.github/workflows/build-windows-exe.yml` wraps exactly that with
+PyInstaller into a standalone `GhostPlanner.exe`, on every push to `main`
+(also on-demand via the Actions tab's "Run workflow" button, and attached
+to a GitHub Release on any `v*` tag push):
+
+1. Builds the frontend (`npm ci && npm run build`).
+2. Runs PyInstaller (`--onefile`) against `backend/server.py`, with
+   `--collect-all pymavlink` (it picks its MAVLink dialect module via a
+   dynamic import PyInstaller's static analysis can't see on its own —
+   without this the exe builds fine but fails to talk to any Cube) and
+   `--add-data "../frontend/dist;frontend_dist"` to bundle the built UI
+   into the exe. `server.py` resolves that bundled path itself at runtime
+   via `sys._MEIPASS` when `sys.frozen` is set (see `FRONTEND_DIST` near
+   the top of the file) — no separate frozen-vs-dev config needed.
+3. **Smoke-tests the built exe on the runner itself**: launches it, polls
+   `/status` and `/` until both respond (or 20s times out the job), then
+   kills it. This catches "the exe doesn't actually launch/serve" before
+   anyone downloads it — it can't test radio/Cube hardware (none is
+   attached to a GitHub-hosted runner), but it does catch packaging
+   regressions in the frozen-path or pymavlink-bundling logic above.
+4. Uploads `GhostPlanner.exe` as a workflow run artifact (Actions tab →
+   the run → Artifacts), or as a Release asset for tag pushes.
+
+The exe ships with **no Google Maps API key baked in** — see "Map" above
+for how that's supplied at runtime instead. It's also unsigned, so
+Windows SmartScreen/antivirus may flag it on first run; that's expected
+for an unsigned PyInstaller build, not a sign of a bad one.
 
 ## Autonomous waypoint navigation ("Autonomy" — the default mode)
 

@@ -27,6 +27,7 @@ Protocol (newline-delimited JSON):
 Run: python3 server.py [http_port] [radio_port] [baud]
 """
 import json
+import os
 import sys
 import threading
 import time
@@ -107,6 +108,59 @@ else:
 
 app = Flask(__name__, static_folder=str(FRONTEND_DIST), static_url_path="/")
 CORS(app)  # frontend dev server runs on a different port (5173) during development
+
+# Runtime-editable config (currently just the Google Maps API key -- see
+# /api/config below). The frontend used to get this baked in at BUILD time
+# via Vite's VITE_GOOGLE_MAPS_API_KEY env var -- fine for local dev, but a
+# packaged .exe is built once in CI and distributed afterward, so there's
+# no build step left to bake a key into at install time. Serving it from
+# here instead means the exe can ship with no key at all, and whoever runs
+# it enters their own once, through the UI, no rebuild involved.
+#
+# Deliberately NOT stored inside sys._MEIPASS -- that's a fresh temp
+# extraction dir every single launch of a onefile exe, so anything written
+# there is gone the moment the process exits. Next to the actual exe
+# (sys.executable) persists across runs; next to this source file in dev.
+if getattr(sys, "frozen", False):
+    CONFIG_PATH = Path(sys.executable).resolve().parent / "config.json"
+else:
+    CONFIG_PATH = Path(__file__).resolve().parent / "config.json"
+
+
+def _load_config():
+    if CONFIG_PATH.exists():
+        try:
+            return json.loads(CONFIG_PATH.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+_config = _load_config()
+# An env var, if set, always wins over the persisted file -- convenient
+# for dev/CI without writing a file, and lets a fixed deployment override
+# whatever a previous run saved.
+_google_maps_api_key = os.environ.get("GOOGLE_MAPS_API_KEY") or _config.get("google_maps_api_key") or ""
+
+
+@app.route("/api/config")
+def get_config():
+    return jsonify(google_maps_api_key=_google_maps_api_key or None)
+
+
+@app.route("/api/config", methods=["POST"])
+def set_config():
+    global _google_maps_api_key
+    data = request.get_json(force=True)
+    key = (data.get("google_maps_api_key") or "").strip()
+    if not key:
+        return jsonify(ok=False, error="google_maps_api_key required"), 400
+    try:
+        CONFIG_PATH.write_text(json.dumps({"google_maps_api_key": key}))
+    except OSError as e:
+        return jsonify(ok=False, error=f"could not save config: {e}"), 500
+    _google_maps_api_key = key
+    return jsonify(ok=True)
 
 _lock = threading.Lock()
 _target = {"steer": 0.0, "throttle": 0.0, "arm": False}

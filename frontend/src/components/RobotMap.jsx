@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useJsApiLoader, GoogleMap } from "@react-google-maps/api";
 
-const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
 const CONTAINER_STYLE = { width: "100%", height: "100%" };
 const MAP_OPTIONS = {
   streetViewControl: false,
@@ -59,10 +58,54 @@ function dotIcon(color) {
 const ROBOT_COLOR = "#58a6ff";
 const LEADER_COLOR = "#3fb950";
 
-export default function RobotMap({ lat, lon, hasFix, heading, path, loop, leader, onMapClick }) {
+// Shown instead of the map when the backend has no Google Maps API key
+// configured yet -- lets whoever's running this (e.g. a packaged .exe with
+// no build-time key baked in) supply their own without a rebuild. Saves
+// via POST /api/config, persisted to a local file next to the exe/server.py
+// so it's remembered on the next launch too.
+function ApiKeyForm({ onSave }) {
+  const [value, setValue] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (!value.trim() || !onSave) return;
+    setSaving(true);
+    setError(null);
+    onSave(value.trim())
+      .catch(() => setError("Couldn't save the key -- check the backend is running."))
+      .finally(() => setSaving(false));
+  };
+
+  return (
+    <div className="map-fill map-placeholder">
+      <form className="api-key-form" onSubmit={submit}>
+        <p>Enter a Google Maps API key to enable the map.</p>
+        <div className="api-key-row">
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="AIza..."
+            autoFocus
+          />
+          <button type="submit" disabled={saving || !value.trim()}>
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+        {error && <p className="error">{error}</p>}
+      </form>
+    </div>
+  );
+}
+
+export default function RobotMap({
+  lat, lon, hasFix, heading, path, loop, leader, onMapClick, apiKey, onSaveApiKey,
+}) {
   const { isLoaded, loadError } = useJsApiLoader({
     id: "followbot-google-map",
-    googleMapsApiKey: API_KEY,
+    googleMapsApiKey: apiKey || "",
   });
 
   // Center is only ever set ONCE, on the first fix -- not recomputed as a
@@ -217,13 +260,14 @@ export default function RobotMap({ lat, lon, hasFix, heading, path, loop, leader
     pathLineRef.current.setPath(points);
   }, [hasFix, lat, lon, path, loop]);
 
-  if (!API_KEY) {
-    return (
-      <div className="map-fill map-placeholder">
-        No Google Maps API key set. Add one to <code>frontend/.env</code> as{" "}
-        <code>VITE_GOOGLE_MAPS_API_KEY</code>, then restart the dev server.
-      </div>
-    );
+  if (apiKey === null) {
+    // Still waiting on the initial GET /api/config -- distinct from "" (a
+    // confirmed empty key), so this brief loading state doesn't flash the
+    // "enter a key" form for a split second on every page load.
+    return <div className="map-fill map-placeholder">Loading map…</div>;
+  }
+  if (!apiKey) {
+    return <ApiKeyForm onSave={onSaveApiKey} />;
   }
   if (loadError) {
     return <div className="map-fill map-placeholder error">Failed to load Google Maps.</div>;

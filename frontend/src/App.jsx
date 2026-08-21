@@ -17,6 +17,20 @@ export default function App() {
   });
   const [path, setPath] = useState([]);
   const [loop, setLoop] = useState(false);
+  // null = still asking the backend; "" = confirmed no key set yet; a
+  // string = the actual key. Served from the backend rather than baked in
+  // at build time (Vite's old VITE_GOOGLE_MAPS_API_KEY approach) because a
+  // packaged .exe is built once in CI and distributed afterward -- there's
+  // no build step left at install time to bake a key into, so whoever runs
+  // it needs to be able to enter their own without a rebuild.
+  const [mapsApiKey, setMapsApiKey] = useState(null);
+  useEffect(() => {
+    api
+      .getConfig()
+      .then((cfg) => setMapsApiKey(cfg.google_maps_api_key || ""))
+      .catch(() => setMapsApiKey(""));
+  }, []);
+  const saveMapsApiKey = (key) => api.setGoogleMapsApiKey(key).then(() => setMapsApiKey(key));
   const [maxForward, setMaxForward] = useState(
     () => Number(localStorage.getItem("maxForward")) || 0.6
   );
@@ -231,6 +245,8 @@ export default function App() {
           loop={loop}
           leader={shadow.leader}
           onMapClick={addWaypoint}
+          apiKey={mapsApiKey}
+          onSaveApiKey={saveMapsApiKey}
         />
         <NavControls
           path={path}

@@ -24,4 +24,6 @@ export const api = {
   shadowSetDistance: (distanceM) => post("/shadow/distance", { distance_m: distanceM }),
   shadowSetMaxSpeed: (speedMps) => post("/shadow/max_speed", { max_speed_mps: speedMps }),
   emergencyStop: () => post("/emergency_stop"),
+  getConfig: () => fetch(`${BASE}/api/config`).then((r) => r.json()),
+  setGoogleMapsApiKey: (key) => post("/api/config", { google_maps_api_key: key }),
 };
