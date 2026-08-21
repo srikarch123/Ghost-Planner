@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
-import RobotMap from "./components/RobotMap";
+import RobotMap, { ApiKeyForm } from "./components/RobotMap";
 import ControlPanel from "./components/ControlPanel";
 import NavControls from "./components/NavControls";
 import ShadowPanel from "./components/ShadowPanel";
@@ -236,18 +236,23 @@ export default function App() {
       </header>
 
       <main className="map-area">
-        <RobotMap
-          lat={status.lat}
-          lon={status.lon}
-          hasFix={hasFix}
-          heading={status.heading_deg}
-          path={path}
-          loop={loop}
-          leader={shadow.leader}
-          onMapClick={addWaypoint}
-          apiKey={mapsApiKey}
-          onSaveApiKey={saveMapsApiKey}
-        />
+        {mapsApiKey ? (
+          <RobotMap
+            lat={status.lat}
+            lon={status.lon}
+            hasFix={hasFix}
+            heading={status.heading_deg}
+            path={path}
+            loop={loop}
+            leader={shadow.leader}
+            onMapClick={addWaypoint}
+            apiKey={mapsApiKey}
+          />
+        ) : mapsApiKey === null ? (
+          <div className="map-fill map-placeholder">Loading map…</div>
+        ) : (
+          <ApiKeyForm onSave={saveMapsApiKey} />
+        )}
         <NavControls
           path={path}
           loop={loop}

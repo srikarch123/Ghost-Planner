@@ -58,12 +58,26 @@ function dotIcon(color) {
 const ROBOT_COLOR = "#58a6ff";
 const LEADER_COLOR = "#3fb950";
 
-// Shown instead of the map when the backend has no Google Maps API key
-// configured yet -- lets whoever's running this (e.g. a packaged .exe with
-// no build-time key baked in) supply their own without a rebuild. Saves
-// via POST /api/config, persisted to a local file next to the exe/server.py
-// so it's remembered on the next launch too.
-function ApiKeyForm({ onSave }) {
+// Shown by App.jsx INSTEAD of <RobotMap> (not from within it) when the
+// backend has no Google Maps API key configured yet -- lets whoever's
+// running this (e.g. a packaged .exe with no build-time key baked in)
+// supply their own without a rebuild. Saves via POST /api/config,
+// persisted to a local file next to the exe/server.py so it's remembered
+// on the next launch too.
+//
+// Deliberately NOT rendered from inside RobotMap based on a prop: the
+// Google Maps loader (useJsApiLoader below, wrapping @googlemaps/js-api-
+// loader's Loader) is a page-wide singleton that throws ("Loader must not
+// be called again with different options") if it's ever invoked twice
+// with a different API key in the same page session. Since apiKey starts
+// out unknown while GET /api/config is in flight, calling the hook
+// unconditionally inside RobotMap with a placeholder value first and the
+// real key moments later hit exactly that crash -- every time, not just
+// when a user actively re-enters a key. Fix: App.jsx doesn't mount
+// <RobotMap> (and so never calls this hook) until it already has the
+// confirmed real key in hand, so the hook only ever runs once, already
+// correct.
+export function ApiKeyForm({ onSave }) {
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -101,11 +115,14 @@ function ApiKeyForm({ onSave }) {
 }
 
 export default function RobotMap({
-  lat, lon, hasFix, heading, path, loop, leader, onMapClick, apiKey, onSaveApiKey,
+  lat, lon, hasFix, heading, path, loop, leader, onMapClick, apiKey,
 }) {
+  // `apiKey` is guaranteed non-empty here -- App.jsx only mounts this
+  // component once it has a confirmed real key (see the ApiKeyForm comment
+  // above for why that matters).
   const { isLoaded, loadError } = useJsApiLoader({
     id: "followbot-google-map",
-    googleMapsApiKey: apiKey || "",
+    googleMapsApiKey: apiKey,
   });
 
   // Center is only ever set ONCE, on the first fix -- not recomputed as a
@@ -260,15 +277,6 @@ export default function RobotMap({
     pathLineRef.current.setPath(points);
   }, [hasFix, lat, lon, path, loop]);
 
-  if (apiKey === null) {
-    // Still waiting on the initial GET /api/config -- distinct from "" (a
-    // confirmed empty key), so this brief loading state doesn't flash the
-    // "enter a key" form for a split second on every page load.
-    return <div className="map-fill map-placeholder">Loading map…</div>;
-  }
-  if (!apiKey) {
-    return <ApiKeyForm onSave={onSaveApiKey} />;
-  }
   if (loadError) {
     return <div className="map-fill map-placeholder error">Failed to load Google Maps.</div>;
   }
